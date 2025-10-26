@@ -1,25 +1,75 @@
-import type { EmitEntry, Plugin } from '@/plugins';
+import type { EmitEntry, Plugin } from '@/core';
 import type { LoadedConfig } from '@/loaders/config';
 import { z } from 'zod';
+import { createCollectionMatcher } from '@/utils/collections';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+export interface JSONSchemaOptions {
+  /**
+   * insert `$schema` field to JSON files on creation.
+   *
+   * @defaultValue false
+   */
+  insert?: boolean;
+}
 
 /**
  * Generate JSON schemas locally for collection schemas
  *
  * note: **it only works with Zod**
  */
-export default function jsonSchema(): Plugin {
+export default function jsonSchema({
+  insert = false,
+}: JSONSchemaOptions = {}): Plugin {
   let config: LoadedConfig;
+
+  function getSchemaPath(name: string) {
+    return `json-schema/${name}.json`;
+  }
 
   return {
     config(v) {
       config = v;
+    },
+    configureServer(server) {
+      if (!server.watcher || !insert) return;
+      const matcher = createCollectionMatcher(this.core);
+
+      server.watcher.on('add', async (file) => {
+        const match = matcher.getFileCollection(file);
+        if (!match || match.collection.type !== 'meta') return;
+
+        const { name } = match;
+        const parent = config.collections.get(name);
+
+        let obj: object;
+        try {
+          const content = (await fs.readFile(file)).toString();
+          obj = content.length > 0 ? JSON.parse(content) : {};
+        } catch {
+          return;
+        }
+
+        if ('$schema' in obj) return;
+        const schemaPath = path.join(
+          this.outDir,
+          getSchemaPath(parent?.type === 'docs' ? `${name}.meta` : name),
+        );
+        const updated = {
+          $schema: path.relative(path.dirname(file), schemaPath),
+          ...obj,
+        };
+
+        await fs.writeFile(file, JSON.stringify(updated, null, 2));
+      });
     },
     emit() {
       const files: EmitEntry[] = [];
 
       function onSchema(name: string, schema: z.ZodSchema) {
         files.push({
-          path: `json-schema/${name}.json`,
+          path: getSchemaPath(name),
           content: JSON.stringify(
             z.toJSONSchema(schema, {
               io: 'input',
