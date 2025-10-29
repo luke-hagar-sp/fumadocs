@@ -1,9 +1,59 @@
-import { type HTMLAttributes, type RefObject, useEffect, useRef } from 'react';
-import * as Primitive from 'fumadocs-core/toc';
-import { useOnChange } from 'fumadocs-core/utils/use-on-change';
-import { useEffectEvent } from 'fumadocs-core/utils/use-effect-event';
+import {
+  type HTMLAttributes,
+  type RefObject,
+  useEffect,
+  useEffectEvent,
+  useRef,
+} from 'react';
+import { useActiveAnchors } from 'fumadocs-core/toc';
 
 export type TOCThumb = [top: number, height: number];
+
+interface RefProps {
+  containerRef: RefObject<HTMLElement | null>;
+}
+
+export function TocThumb({
+  containerRef,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & RefProps) {
+  const thumbRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <>
+      <div ref={thumbRef} role="none" {...props} />
+      <Updater containerRef={containerRef} thumbRef={thumbRef} />
+    </>
+  );
+}
+
+function Updater({
+  containerRef,
+  thumbRef,
+}: RefProps & { thumbRef: RefObject<HTMLElement | null> }) {
+  const active = useActiveAnchors();
+  const onPrint = useEffectEvent(() => {
+    if (!containerRef.current || !thumbRef.current) return;
+
+    update(thumbRef.current, calc(containerRef.current, active));
+  });
+
+  useEffect(() => onPrint(), [active]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+
+    const observer = new ResizeObserver(onPrint);
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [containerRef]);
+
+  return null;
+}
 
 function calc(container: HTMLElement, active: string[]): TOCThumb {
   if (active.length === 0 || container.clientHeight === 0) {
@@ -33,41 +83,4 @@ function calc(container: HTMLElement, active: string[]): TOCThumb {
 function update(element: HTMLElement, info: TOCThumb): void {
   element.style.setProperty('--fd-top', `${info[0]}px`);
   element.style.setProperty('--fd-height', `${info[1]}px`);
-}
-
-export function TocThumb({
-  containerRef,
-  ...props
-}: HTMLAttributes<HTMLDivElement> & {
-  containerRef: RefObject<HTMLElement | null>;
-}) {
-  const active = Primitive.useActiveAnchors();
-  const thumbRef = useRef<HTMLDivElement>(null);
-
-  const onResize = useEffectEvent(() => {
-    if (!containerRef.current || !thumbRef.current) return;
-
-    update(thumbRef.current, calc(containerRef.current, active));
-  });
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const container = containerRef.current;
-
-    onResize();
-    const observer = new ResizeObserver(onResize);
-    observer.observe(container);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [containerRef]);
-
-  useOnChange(active, () => {
-    if (!containerRef.current || !thumbRef.current) return;
-
-    update(thumbRef.current, calc(containerRef.current, active));
-  });
-
-  return <div ref={thumbRef} role="none" {...props} />;
 }

@@ -1,5 +1,28 @@
 # @fuma-docs/openapi
 
+## 9.7.1
+
+### Patch Changes
+
+- Updated dependencies [8221785]
+  - fumadocs-core@16.0.5
+  - fumadocs-ui@16.0.5
+
+## 9.7.0
+
+### Minor Changes
+
+- ef73516: Support `per: custom`
+
+## 9.6.5
+
+### Patch Changes
+
+- d9d73f3: Support `groupBy` function value
+- Updated dependencies [99971c7]
+  - fumadocs-core@16.0.4
+  - fumadocs-ui@16.0.4
+
 ## 9.6.4
 
 ### Patch Changes

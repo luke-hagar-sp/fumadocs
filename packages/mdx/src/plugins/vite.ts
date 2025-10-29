@@ -11,7 +11,7 @@ import {
   generateGlobImport,
   type GlobImportOptions,
 } from '@/utils/glob-import';
-import type { Plugin } from '@/core';
+import type { EmitEntry, Plugin, PluginContext } from '@/core';
 import path from 'node:path';
 
 export interface IndexFileOptions {
@@ -27,9 +27,18 @@ export interface IndexFileOptions {
    * add `.js` extensions to imports, needed for ESM without bundler resolution
    */
   addJsExtension?: boolean;
+
+  /**
+   * Generate entry point for browser environment
+   */
+  browser?: boolean;
 }
 
-export default function vite(options: IndexFileOptions): Plugin {
+export default function vite({
+  index,
+}: {
+  index: IndexFileOptions | boolean;
+}): Plugin {
   let config: LoadedConfig;
 
   return {
@@ -37,27 +46,50 @@ export default function vite(options: IndexFileOptions): Plugin {
       config = v;
     },
     emit() {
-      return [
-        {
-          path: 'index.ts',
-          content: indexFile(this.configPath, this.outDir, config, options),
-        },
-      ];
+      const out: EmitEntry[] = [];
+      if (index === false) return out;
+
+      const indexOptions: IndexFileOptions =
+        typeof index === 'object' ? index : {};
+      const { browser = false } = indexOptions;
+      if (browser) {
+        out.push({
+          path: 'browser.ts',
+          content: indexFile(this, config, indexOptions, 'browser'),
+        });
+      }
+
+      out.push({
+        path: 'index.ts',
+        content: indexFile(
+          this,
+          config,
+          indexOptions,
+          browser ? 'server' : 'all',
+        ),
+      });
+
+      return out;
     },
   };
 }
 
 function indexFile(
-  configPath: string,
-  outDir: string,
+  { configPath, outDir }: PluginContext,
   config: LoadedConfig,
   options: IndexFileOptions,
+  environment: 'all' | 'browser' | 'server',
 ) {
   const { addJsExtension = false, runtime } = options;
+  const runtimePath = {
+    all: 'fumadocs-mdx/runtime/vite',
+    server: 'fumadocs-mdx/runtime/vite.server',
+    browser: 'fumadocs-mdx/runtime/vite.browser',
+  }[environment];
 
   const lines = [
     '/// <reference types="vite/client" />',
-    `import { fromConfig } from 'fumadocs-mdx/runtime/vite';`,
+    `import { fromConfig } from '${runtimePath}';`,
     `import type * as Config from '${toImportPath(configPath, {
       relativeTo: outDir,
       jsExtension: addJsExtension,
@@ -77,12 +109,12 @@ function indexFile(
 
   function doc(name: string, collection: DocCollection) {
     const patterns = getGlobPatterns(collection);
-    const base = getGlobBase(collection);
+    const dir = getCollectionDir(collection);
     const docGlob = generateGlob(patterns, {
       query: {
         collection: name,
       },
-      base,
+      base: dir,
     });
 
     if (collection.async) {
@@ -92,22 +124,22 @@ function indexFile(
           collection: name,
         },
         import: 'frontmatter',
-        base,
+        base: dir,
       });
 
-      return `create.docLazy("${name}", "${base}", ${headBlob}, ${docGlob})`;
+      return `create.docLazy("${name}", "${dir}", ${headBlob}, ${docGlob})`;
     }
 
-    return `create.doc("${name}", "${base}", ${docGlob})`;
+    return `create.doc("${name}", "${dir}", ${docGlob})`;
   }
 
   function meta(name: string, collection: MetaCollection) {
     const patterns = getGlobPatterns(collection);
-    const base = getGlobBase(collection);
+    const dir = getCollectionDir(collection);
 
-    return `create.meta("${name}", "${base}", ${generateGlob(patterns, {
+    return `create.meta("${name}", "${dir}", ${generateGlob(patterns, {
       import: 'default',
-      base,
+      base: dir,
       query: {
         collection: name,
       },
@@ -115,7 +147,7 @@ function indexFile(
   }
 
   function generateGlob(patterns: string[], options: GlobImportOptions) {
-    patterns = mapGlobPatterns(patterns);
+    patterns = patterns.map(normalizeGlobPath);
 
     if (runtime === 'node' || runtime === 'bun') {
       return generateGlobImport(patterns, options);
@@ -123,7 +155,7 @@ function indexFile(
       return `import.meta.glob(${JSON.stringify(patterns)}, ${JSON.stringify(
         {
           ...options,
-          base: path.relative(outDir, options.base),
+          base: normalizeGlobPath(path.relative(outDir, options.base)),
         },
         null,
         2,
@@ -149,19 +181,19 @@ function indexFile(
   return lines.join('\n');
 }
 
-function mapGlobPatterns(patterns: string[]) {
-  return patterns.map(enforceRelative);
-}
-
-function enforceRelative(file: string) {
+/**
+ * convert into POSIX & relative file paths, such that Vite can accept it.
+ */
+function normalizeGlobPath(file: string) {
+  file = slash(file);
   if (file.startsWith('./')) return file;
   if (file.startsWith('/')) return `.${file}`;
 
   return `./${file}`;
 }
 
-function getGlobBase(collection: AnyCollection) {
-  let dir = collection.dir;
+function getCollectionDir(collection: AnyCollection): string {
+  const dir = collection.dir;
 
   if (Array.isArray(dir)) {
     if (dir.length !== 1)
@@ -169,8 +201,18 @@ function getGlobBase(collection: AnyCollection) {
         `[Fumadocs MDX] Vite Plugin doesn't support multiple \`dir\` for a collection at the moment.`,
       );
 
-    dir = dir[0];
+    return dir[0];
   }
 
-  return enforceRelative(dir);
+  return dir;
+}
+
+function slash(path: string): string {
+  const isExtendedLengthPath = path.startsWith('\\\\?\\');
+
+  if (isExtendedLengthPath) {
+    return path;
+  }
+
+  return path.replaceAll('\\', '/');
 }
