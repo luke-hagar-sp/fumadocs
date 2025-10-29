@@ -1,5 +1,13 @@
 # next-docs-mdx
 
+## 13.0.3
+
+### Patch Changes
+
+- 94d1ad5: Support generating extra index file for browser (workaround for Cloudflare Vite issues)
+- Updated dependencies [b95b0cf]
+  - fumadocs-core@16.0.6
+
 ## 13.0.2
 
 ### Patch Changes
